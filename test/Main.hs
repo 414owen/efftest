@@ -1,31 +1,37 @@
+{-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main (main) where
 
+import Control.Monad.Trans.Writer.Lazy (Writer, execWriter, tell)
 import Control.Exception (throwIO)
 import Data.Bifunctor (first)
 import qualified Act
 
-data ActTest
+data ActTest'
   = Fetch { fetchUrl :: String, fetchRes :: String }
   | Print String
   deriving Show
 
--- instance Show ActTest where
---   show a = case a of
---     Fetch { url } -> "Fetch " <> url
---     Print str -> "Print " <> str
+-- TODO use dlist?
+type ActTest = Writer [ActTest'] ()
 
-runTest :: Show a => Act.Act a -> [ActTest] -> Either String a
-runTest action testActions = case go action testActions of
+expFetch :: String -> String -> ActTest
+expFetch url res = tell $ pure $ Fetch url res
+
+expPrint :: String -> ActTest
+expPrint = tell . pure . Print
+
+runTest :: Show a => Act.Act a -> ActTest -> Either String a
+runTest action testActions = case go action (execWriter testActions) of
   Left err -> Left err
   Right (_, _ : _) -> Left $ "Expected more actions: " <> show testActions
   Right (a, []) -> Right a
 
   where
-    go :: Act.Act a -> [ActTest] -> Either String (a, [ActTest])
+    go :: Act.Act a -> [ActTest'] -> Either String (a, [ActTest'])
     go act testActs = case (act, testActs) of
       (Act.FMap f a, _) -> first f <$> go a testActs
       (Act.Bind left right, _) -> do
@@ -47,7 +53,11 @@ main :: IO ()
 main = eitherToIO $ runTest acts expected
   where
     acts :: Act.Act ()
-    acts = Act.Bind (Act.Fetch "owen.cafe") Act.Print
+    acts = do
+      res <- Act.Fetch "owen.cafe"
+      Act.Print res
 
-    expected :: [ActTest]
-    expected = [Fetch { fetchUrl = "owen.cafe", fetchRes = "hello" }, Print "hello"]
+    expected :: ActTest
+    expected = do
+      expFetch "owen.cafe" "hello"
+      expPrint "hello"

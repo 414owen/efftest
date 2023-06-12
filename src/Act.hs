@@ -5,10 +5,14 @@
 module Act
   ( Act(..)
   , interpretIO
+  , interpretParallel
   ) where
 
+import qualified Control.Concurrent.Async  as Async
 import qualified Data.ByteString.Lazy.UTF8 as BSL
-import           Network.HTTP.Conduit (simpleHttp)
+import           Network.HTTP.Conduit      (simpleHttp)
+import Data.Bifunctor (bimap)
+import Control.Concurrent.Async (Async)
 
 data Act a where
   Fetch :: String -> Act String
@@ -60,3 +64,31 @@ interpretIO m = case m of
   FMap f a -> f <$> interpretIO a
   Pure a -> pure a
   Ap f a -> interpretIO f <*> interpretIO a
+
+wait :: Either (Async a) a -> IO a
+wait e = case e of
+  Left a -> Async.wait a
+  Right a -> pure a
+
+-- This interprets actions it deems to be expensive
+-- (eg database queries, network requests), in parallel
+interpretParallel :: Act a -> IO (Either (Async a) a)
+interpretParallel m = case m of
+  -- fetching is expensive
+  Fetch url -> fmap Left $ Async.async $ BSL.toString <$> simpleHttp url
+  -- printing is cheap
+  Print str -> Right <$> putStr str
+  Bind act f -> do
+    a <- interpretParallel act
+    b <- wait a
+    interpretParallel $ f b
+  FMap f a -> bimap (fmap f) f <$> interpretParallel a
+  Pure a -> pure $ Right a
+  Ap f a -> do
+    g <- interpretParallel f
+    case g of
+      Left asyncG -> do
+        val <- wait =<< interpretParallel a
+        h <- Async.wait asyncG
+        pure $ Right $ h val
+      Right syncG -> bimap (fmap syncG) syncG <$> interpretParallel a
