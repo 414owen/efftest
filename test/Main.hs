@@ -9,6 +9,7 @@ import Control.Monad.Trans.Writer.Lazy (Writer, execWriter, tell)
 import Control.Exception (throwIO)
 import Data.Bifunctor (first)
 import qualified Act
+import Data.Char (toUpper)
 
 data ActTest'
   = Fetch { fetchUrl :: String, fetchRes :: String }
@@ -49,15 +50,15 @@ eitherToIO e = case e of
   Left err -> throwIO $ userError err
   Right a -> pure a
 
-main :: IO ()
-main = eitherToIO $ runTest acts expected
-  where
-    acts :: Act.Act ()
-    acts = do
-      res <- Act.Fetch "owen.cafe"
-      Act.Print res
+sampleProgram :: Act.Act ()
+sampleProgram = do
+  res <- Act.Fetch "owen.cafe"
+  Act.Print $ toUpper <$> res
 
+main :: IO ()
+main = eitherToIO $ runTest sampleProgram expected
+  where
     expected :: ActTest
     expected = do
-      expFetch "owen.cafe" "hello"
-      expPrint "hello"
+      expFetch "owen.cafe" "hello, world!"
+      expPrint "HELLO, WORLD!"
