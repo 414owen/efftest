@@ -9,14 +9,16 @@ module Act
   ) where
 
 import qualified Control.Concurrent.Async  as Async
+import           Control.Exception         (throwIO)
 import qualified Data.ByteString.Lazy.UTF8 as BSL
 import           Network.HTTP.Conduit      (simpleHttp)
-import Data.Bifunctor (bimap)
-import Control.Concurrent.Async (Async)
+import           Data.Bifunctor            (bimap)
+import           Control.Concurrent.Async  (Async)
 
 data Act a where
   Fetch :: String -> Act String
   Print :: String -> Act ()
+  Fail  :: String -> Act ()
 
   -- Could we implement these in terms of Bind? Sure!
   -- But that means we can't parallelize these
@@ -49,6 +51,7 @@ showAct :: Act a -> [String]
 showAct a = case a of
   Fetch url -> ["Fetch " <> url]
   Print str -> ["Print " <> str]
+  Fail str -> ["Fail " <> str]
   Bind l _ -> "Bind" : sep <> show l : [sep <> "<fn>"]
   FMap _ _-> "Fmap" : sep <> "<fn> " : indent (showAct a)
   Pure _ -> ["Pure"]
@@ -58,6 +61,7 @@ interpretIO :: Act a -> IO a
 interpretIO m = case m of
   Fetch url -> BSL.toString <$> simpleHttp url
   Print str -> putStr str
+  Fail str -> throwIO $ userError str
   Bind act f -> do
     a <- interpretIO act
     interpretIO $ f a
@@ -81,6 +85,7 @@ interpretParallel' m = case m of
   Fetch url -> fmap Left $ Async.async $ BSL.toString <$> simpleHttp url
   -- printing is cheap
   Print str -> Right <$> putStr str
+  Fail str -> throwIO $ userError str
   Bind act f -> do
     a <- interpretParallel' act
     b <- wait a
